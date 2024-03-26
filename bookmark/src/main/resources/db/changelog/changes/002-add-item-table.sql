@@ -1,0 +1,8 @@
+CREATE TABLE Item
+(
+    id    BIGINT PRIMARY KEY AUTO_INCREMENT,
+    mId   VARCHAR(255) NOT NULL,
+    name  VARCHAR(255) NOT NULL,
+    price DOUBLE NOT NULL,
+    INDEX idx_mId (mId)
+);

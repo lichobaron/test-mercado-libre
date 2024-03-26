@@ -1,0 +1,53 @@
+databaseChangeLog:
+  - include:
+      file: classpath:/db/changelog/changes/001-add-user-table.sql
+
+  - include:
+      file: classpath:/db/changelog/changes/002-add-item-table.sql
+
+  - include:
+      file: classpath:/db/changelog/changes/003-add-user_item-table.sql
+
+  - changeSet:
+      id: 4
+      author: user
+      changes:
+        - loadData:
+            file: classpath:/db/data/item.csv
+            separator: ","
+            tableName: Item
+            columns:
+              - column:
+                  type: VARCHAR(255)
+              - column:
+                  type: VARCHAR(255)
+              - column:
+                  type: DOUBLE
+
+  - changeSet:
+      id: 5
+      author: user
+      changes:
+        - loadData:
+            file: classpath:/db/data/user.csv
+            separator: ","
+            tableName: User
+            columns:
+              - column:
+                  type: VARCHAR(255)
+              - column:
+                  type: VARCHAR(255)
+
+  - changeSet:
+      id: 6
+      author: user
+      changes:
+        - loadData:
+            file: classpath:/db/data/user_item.csv
+            separator: ","
+            tableName: user_item
+            columns:
+              - column:
+                  type: BIGINT
+              - column:
+                  type: BIGINT

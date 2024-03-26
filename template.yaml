@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS CloudFormation Template for deploying a Spring Boot API with MySQL on Fargate
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where resources will be deployed
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for deploying Fargate tasks
+  DBName:
+    Type: String
+    Description: Name of the MySQL database
+    Default: mydatabase
+  DBUsername:
+    Type: String
+    Description: Username for accessing the MySQL database
+    Default: admin
+  DBPassword:
+    Type: String
+    Description: Password for accessing the MySQL database
+    NoEcho: true
+  SpringBootImage:
+    Type: String
+    Description: Docker image URI for the Spring Boot API
+  SpringBootPort:
+    Type: Number
+    Description: Port on which Spring Boot API will listen
+    Default: 8080
+
+Resources:
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: SpringBootAPILoadBalancer
+      Scheme: internet-facing
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !GetAtt LoadBalancerSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: SpringBootAPILoadBalancer
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: SpringBootAPITargetGroup
+      Port: !Ref SpringBootPort
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+        - Key: stickiness.enabled
+          Value: 'false'
+        - Key: load_balancing.algorithm.type
+          Value: least_outstanding_requests  # Setting the load balancing algorithm to least_outstanding_requests
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: springboot-api-task
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      NetworkMode: awsvpc
+      ContainerDefinitions:
+        - Name: springboot-container
+          Image: !Ref SpringBootImage
+          PortMappings:
+            - ContainerPort: !Ref SpringBootPort
+
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSExecutionPolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  ECSFargatePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ECSFargatePolicy
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecs:RunTask
+              - ecs:StopTask
+              - ecs:DescribeTasks
+              - ecs:ListTasks
+              - ecs:UpdateService
+              - ecs:RegisterTaskDefinition
+              - ecs:DeregisterTaskDefinition
+            Resource: "*"
+      Roles:
+        - Ref: ECSExecutionRole
+
+  SourceDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: SourceDBInstance
+      DBName: !Ref DBName
+      AllocatedStorage: 20
+      DBInstanceClass: db.t2.micro
+      Engine: mysql
+      EngineVersion: '5.7'
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      PubliclyAccessible: false
+      StorageType: gp2
+      MultiAZ: false
+      VPCSecurityGroups:
+        - !GetAtt DatabaseSecurityGroup.GroupId
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS database
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+
+  ReadReplicaDBInstance1:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      SourceDBInstanceIdentifier: !Ref SourceDBInstance
+      DBInstanceIdentifier: ReadReplicaDBInstance1
+      DBInstanceClass: db.t2.micro
+      AvailabilityZone: !GetAtt SourceDBInstance.AvailabilityZone
+      VPCSecurityGroups:
+        - !GetAtt DatabaseSecurityGroup.GroupId
+
+  ReadReplicaDBInstance2:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      SourceDBInstanceIdentifier: !Ref SourceDBInstance
+      DBInstanceIdentifier: ReadReplicaDBInstance2
+      DBInstanceClass: db.t2.micro
+      AvailabilityZone: !GetAtt SourceDBInstance.AvailabilityZone
+      VPCSecurityGroups:
+        - !GetAtt DatabaseSecurityGroup.GroupId
+
+  ReadReplicaDBInstance3:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      SourceDBInstanceIdentifier: !Ref SourceDBInstance
+      DBInstanceIdentifier: ReadReplicaDBInstance3
+      DBInstanceClass: db.t2.micro
+      AvailabilityZone: !GetAtt SourceDBInstance.AvailabilityZone
+      VPCSecurityGroups:
+        - !GetAtt DatabaseSecurityGroup.GroupId
+
+  APIGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: SpringBootAPI
+
+  APIGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref APIGateway
+
+  APIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref APIGateway
+      ParentId: !GetAtt APIGateway.RootResourceId
+      PathPart: "springboot"
+
+  APIGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: ANY
+      ResourceId: !Ref APIGatewayResource
+      RestApiId: !Ref APIGateway
+
+  APIGatewayIntegration:
+    Type: AWS::ApiGateway::Integration
+    Properties:
+      IntegrationHttpMethod: POST
+      Type: AWS_PROXY
+      Uri: !Sub "arn:aws:apigateway:${AWS::Region}:ecs:path/apis/${APIGateway}/stages/${!Ref APIGatewayDeployment}/invocations"
+
+Outputs:
+  SpringBootAPIEndpoint:
+    Description: Endpoint URL for accessing the Spring Boot API
+    Value: !Sub "http://${LoadBalancer.DNSName}:${SpringBootPort}"

@@ -1,0 +1,8 @@
+CREATE TABLE User
+(
+    id    BIGINT PRIMARY KEY AUTO_INCREMENT,
+    mId   VARCHAR(255) NOT NULL,
+    name  VARCHAR(255) NOT NULL,
+    INDEX idx_mId (mId)
+);
+
