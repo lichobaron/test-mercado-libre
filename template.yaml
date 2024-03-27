@@ -1,17 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: AWS CloudFormation Template for deploying a Spring Boot API with MySQL on Fargate
+Description: AWS CloudFormation Template for deploying a Spring Boot API with MySQL Aurora on Fargate
 
 Parameters:
-  VpcId:
-    Type: AWS::EC2::VPC::Id
-    Description: VPC ID where resources will be deployed
-  SubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: Subnet IDs for deploying Fargate tasks
   DBName:
     Type: String
     Description: Name of the MySQL database
-    Default: mydatabase
+    Default: ml-db
   DBUsername:
     Type: String
     Description: Username for accessing the MySQL database
@@ -20,35 +14,89 @@ Parameters:
     Type: String
     Description: Password for accessing the MySQL database
     NoEcho: true
-  SpringBootImage:
+    Default: admin
+  SpringBootBookmarkImage:
+    Type: String
+    Description: Docker image URI for the Spring Boot
+    Default: https://hub.docker.com/r/lichobaron/bookmark
+  SpringBootCouponImage:
     Type: String
     Description: Docker image URI for the Spring Boot API
-  SpringBootPort:
+    Default: https://hub.docker.com/r/lichobaron/coupon
+  SpringBootBookmarkPort:
     Type: Number
     Description: Port on which Spring Boot API will listen
     Default: 8080
+  SpringBootCouponPort:
+    Type: Number
+    Description: Port on which Spring Boot API will listen
+    Default: 8081
 
 Resources:
-  LoadBalancer:
+  MlVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      Tags:
+        - Key: Name
+          Value: ml-vpc
+
+  ApiSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MlVPC
+      CidrBlock: "10.0.1.0/24"
+      AvailabilityZone: "us-east-1a" # Change this to your desired availability zone
+      Tags:
+        - Key: Name
+          Value: api-subnet
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the SpringBootAPILoadBalancer
+      VpcId: !Ref MlVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80  # Assuming HTTP traffic
+          ToPort: 80
+          CidrIp: 0.0.0.0/0  # Allowing access from anywhere (Update as per your requirements)
+      SecurityGroupEgress:
+        - IpProtocol: "-1"  # Allow all outbound traffic
+          CidrIp: 0.0.0.0/0
+
+  LoadBalancerBookmark:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Name: SpringBootAPILoadBalancer
       Scheme: internet-facing
-      Subnets: !Ref SubnetIds
+      Subnets: !Ref ApiSubnet
       SecurityGroups:
         - !GetAtt LoadBalancerSecurityGroup.GroupId
       Tags:
         - Key: Name
           Value: SpringBootAPILoadBalancer
 
-  TargetGroup:
+  LoadBalancerCoupon:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: SpringBootAPILoadBalancer
+      Scheme: internet-facing
+      Subnets: !Ref ApiSubnet
+      SecurityGroups:
+        - !GetAtt LoadBalancerSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: SpringBootAPILoadBalancer
+
+  TargetGroupBookmark:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       Name: SpringBootAPITargetGroup
-      Port: !Ref SpringBootPort
+      Port: !Ref SpringBootBookmarkPort
       Protocol: HTTP
       TargetType: ip
-      VpcId: !Ref VpcId
+      VpcId: !Ref MlVPC
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '30'
@@ -57,17 +105,75 @@ Resources:
         - Key: load_balancing.algorithm.type
           Value: least_outstanding_requests  # Setting the load balancing algorithm to least_outstanding_requests
 
-  Listener:
+  TargetGroupCoupon:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: SpringBootAPITargetGroup
+      Port: !Ref SpringBootCouponPort
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref MlVPC
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30'
+        - Key: stickiness.enabled
+          Value: 'false'
+        - Key: load_balancing.algorithm.type
+          Value: least_outstanding_requests  # Setting the load balancing algorithm to least_outstanding_requests
+
+  ListenerBookmark:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref TargetGroup
-      LoadBalancerArn: !Ref LoadBalancer
+          TargetGroupArn: !Ref TargetGroupBookmark
+      LoadBalancerArn: !Ref LoadBalancerBookmark
       Port: 80
       Protocol: HTTP
 
-  TaskDefinition:
+  ListenerCoupon:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupCoupon
+      LoadBalancerArn: !Ref LoadBalancerCoupon
+      Port: 80
+      Protocol: HTTP
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - ecs:ExecuteCommand
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                  - ecs:StartTask
+                  - ecs:StopTask
+                  - ecs:UpdateContainerAgent
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DeregisterTaskDefinition
+                Resource: "*"
+
+  BookmarkTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: springboot-api-task
@@ -75,9 +181,21 @@ Resources:
       NetworkMode: awsvpc
       ContainerDefinitions:
         - Name: springboot-container
-          Image: !Ref SpringBootImage
+          Image: !Ref SpringBootBookmarkImage
           PortMappings:
-            - ContainerPort: !Ref SpringBootPort
+            - ContainerPort: !Ref SpringBootBookmarkPort
+
+  CouponTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: springboot-api-task
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      NetworkMode: awsvpc
+      ContainerDefinitions:
+        - Name: springboot-container
+          Image: !Ref SpringBootCouponImage
+          PortMappings:
+            - ContainerPort: !Ref SpringBootCouponPort
 
   ECSExecutionRole:
     Type: AWS::IAM::Role
@@ -117,97 +235,38 @@ Resources:
       Roles:
         - Ref: ECSExecutionRole
 
-  SourceDBInstance:
-    Type: AWS::RDS::DBInstance
+  AuroraDB:
+    Type: AWS::RDS::DBCluster
     Properties:
-      DBInstanceIdentifier: SourceDBInstance
-      DBName: !Ref DBName
-      AllocatedStorage: 20
-      DBInstanceClass: db.t2.micro
-      Engine: mysql
-      EngineVersion: '5.7'
+      Engine: aurora
+      EngineMode: serverless
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Ref DBPassword
-      PubliclyAccessible: false
-      StorageType: gp2
-      MultiAZ: false
-      VPCSecurityGroups:
+      DatabaseName: !Ref DBName
+      ScalingConfiguration:
+        AutoPause: true
+        MinCapacity: 1
+        MaxCapacity: 2
+        SecondsUntilAutoPause: 300
+      VpcSecurityGroupIds:
         - !GetAtt DatabaseSecurityGroup.GroupId
+      EnableHttpEndpoint: true
 
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Security group for RDS database
-      VpcId: !Ref VpcId
+      VpcId: !Ref MlVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 3306
           ToPort: 3306
           CidrIp: 0.0.0.0/0
 
-  ReadReplicaDBInstance1:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      SourceDBInstanceIdentifier: !Ref SourceDBInstance
-      DBInstanceIdentifier: ReadReplicaDBInstance1
-      DBInstanceClass: db.t2.micro
-      AvailabilityZone: !GetAtt SourceDBInstance.AvailabilityZone
-      VPCSecurityGroups:
-        - !GetAtt DatabaseSecurityGroup.GroupId
-
-  ReadReplicaDBInstance2:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      SourceDBInstanceIdentifier: !Ref SourceDBInstance
-      DBInstanceIdentifier: ReadReplicaDBInstance2
-      DBInstanceClass: db.t2.micro
-      AvailabilityZone: !GetAtt SourceDBInstance.AvailabilityZone
-      VPCSecurityGroups:
-        - !GetAtt DatabaseSecurityGroup.GroupId
-
-  ReadReplicaDBInstance3:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      SourceDBInstanceIdentifier: !Ref SourceDBInstance
-      DBInstanceIdentifier: ReadReplicaDBInstance3
-      DBInstanceClass: db.t2.micro
-      AvailabilityZone: !GetAtt SourceDBInstance.AvailabilityZone
-      VPCSecurityGroups:
-        - !GetAtt DatabaseSecurityGroup.GroupId
-
-  APIGateway:
-    Type: AWS::ApiGateway::RestApi
-    Properties:
-      Name: SpringBootAPI
-
-  APIGatewayDeployment:
-    Type: AWS::ApiGateway::Deployment
-    Properties:
-      RestApiId: !Ref APIGateway
-
-  APIGatewayResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref APIGateway
-      ParentId: !GetAtt APIGateway.RootResourceId
-      PathPart: "springboot"
-
-  APIGatewayMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      AuthorizationType: NONE
-      HttpMethod: ANY
-      ResourceId: !Ref APIGatewayResource
-      RestApiId: !Ref APIGateway
-
-  APIGatewayIntegration:
-    Type: AWS::ApiGateway::Integration
-    Properties:
-      IntegrationHttpMethod: POST
-      Type: AWS_PROXY
-      Uri: !Sub "arn:aws:apigateway:${AWS::Region}:ecs:path/apis/${APIGateway}/stages/${!Ref APIGatewayDeployment}/invocations"
-
 Outputs:
-  SpringBootAPIEndpoint:
+  SpringBootBookmarkAPIEndpoint:
     Description: Endpoint URL for accessing the Spring Boot API
-    Value: !Sub "http://${LoadBalancer.DNSName}:${SpringBootPort}"
+    Value: !Sub "http://${LoadBalancerBookmark.DNSName}:${SpringBootBookmarkPort}"
+  SpringBootCouponAPIEndpoint:
+    Description: Endpoint URL for accessing the Spring Boot API
+    Value: !Sub "http://${LoadBalancerCoupon.DNSName}:${SpringBootCouponPort}"
