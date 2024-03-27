@@ -33,81 +33,91 @@ Parameters:
     Default: 8081
 
 Resources:
-  VPC:
+  MLVPC:
     Type: 'AWS::EC2::VPC'
     Properties:
       CidrBlock: '10.0.0.0/16'
       EnableDnsSupport: true
       EnableDnsHostnames: true
 
-  Subnet1:
+  MLSubnet1:
     Type: 'AWS::EC2::Subnet'
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref MLVPC
       CidrBlock: '10.0.0.0/24'
       AvailabilityZone: 'us-east-1a'
 
-  Subnet2:
+  MLSubnet2:
     Type: 'AWS::EC2::Subnet'
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref MLVPC
       CidrBlock: '10.0.1.0/24'
       AvailabilityZone: 'us-east-1b'
 
-  InternetGateway:
+  MLInternetGateway:
     Type: 'AWS::EC2::InternetGateway'
 
   AttachGateway:
     Type: 'AWS::EC2::VPCGatewayAttachment'
     Properties:
-      VpcId: !Ref VPC
-      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref MLVPC
+      InternetGatewayId: !Ref MLInternetGateway
 
-  RouteTable:
+  MLRouteTable:
     Type: 'AWS::EC2::RouteTable'
     Properties:
-      VpcId: !Ref VPC
+      VpcId: !Ref MLVPC
 
-  Subnet1RouteTableAssociation:
+  MLSubnet1RouteTableAssociation:
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
     Properties:
-      SubnetId: !Ref Subnet1
-      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref MLSubnet1
+      RouteTableId: !Ref MLRouteTable
 
-  Subnet2RouteTableAssociation:
+  MLSubnet2RouteTableAssociation:
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
     Properties:
-      SubnetId: !Ref Subnet2
-      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref MLSubnet2
+      RouteTableId: !Ref MLRouteTable
 
-  SecurityGroup:
+  MLSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: 'Security group for Fargate service'
-      VpcId: !Ref VPC
+      VpcId: !Ref MLVPC
 
-  LoadBalancer:
+  MLLoadBalancer:
     Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
     Properties:
-      Name: MyLoadBalancer
+      Name: MlLoadBalancer
       Subnets:
-        - !Ref Subnet1
-        - !Ref Subnet2
+        - !Ref MLSubnet1
+        - !Ref MLSubnet2
       SecurityGroups:
-        - !Ref SecurityGroup
+        - !Ref MLSecurityGroup
       Scheme: internet-facing
       Type: application
 
-  TargetGroup:
+  MLTargetGroup:
     Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
     Properties:
-      Name: MyTargetGroup
+      Name: MlTargetGroup
       Port: 80
       Protocol: HTTP
       TargetType: ip
-      VpcId: !Ref VPC
+      VpcId: !Ref MLVPC
+ 
+  MLListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MLTargetGroup
+      LoadBalancerArn: !Ref MLLoadBalancer
+      Port: 80
+      Protocol: HTTP
 
-  TaskExecutionRole:
+  MLTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -139,7 +149,7 @@ Resources:
                   - ecs:DeregisterTaskDefinition
                 Resource: "*"
 
-  FargateTaskDefinition:
+  MLFargateTaskDefinition:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
       RequiresCompatibilities:
@@ -147,34 +157,47 @@ Resources:
       Cpu: '256'
       Memory: '512'
       NetworkMode: awsvpc
-      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ExecutionRoleArn: !GetAtt MLTaskExecutionRole.Arn
       ContainerDefinitions:
-        - Name: coupon-api
+        - Name: coupon-container
           Image: !Ref SpringBootCouponImage
           PortMappings:
             - ContainerPort: !Ref SpringBootCouponPort
 
-  FargateService:
-    Type: 'AWS::ECS::Service'
+  MLFargateCluster:
+    Type: 'AWS::ECS::Cluster'
     Properties:
-      Cluster: default
+      ClusterName: MLFargateCluster
+
+  MLFargateService:
+    Type: 'AWS::ECS::Service'
+    DependsOn:
+    - MLTargetGroup
+    - MLLoadBalancer
+    - MLListener
+    - MLFargateTaskDefinition
+    - MLFargateCluster
+    Properties:
+      Cluster: !Ref MLFargateCluster
       LaunchType: FARGATE
       DesiredCount: 2
-      TaskDefinition: !Ref FargateTaskDefinition
+      TaskDefinition: !Ref MLFargateTaskDefinition
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
-            - !Ref Subnet1
-            - !Ref Subnet2
+            - !Ref MLSubnet1
+            - !Ref MLSubnet2
           SecurityGroups:
-            - !Ref SecurityGroup
+            - !Ref MLSecurityGroup
       LoadBalancers:
         - ContainerName: coupon-container
-          ContainerPort: 80
-          TargetGroupArn: !Ref TargetGroup
+          ContainerPort: !Ref SpringBootCouponPort
+          TargetGroupArn: !Ref MLTargetGroup
 
-  AuroraDB:
+  MLAuroraDB:
     Type: AWS::RDS::DBCluster
+    DependsOn:
+    - MLFargateService
     Properties:
       Engine: aurora-mysql
       EngineVersion: 5.7.mysql_aurora.2.07.1
@@ -191,5 +214,5 @@ Resources:
 
 Outputs:
   SpringBootCouponAPIEndpoint:
-    Description: Endpoint URL for accessing the Spring Boot API
-    Value: !Sub "http://${LoadBalancer.DNSName}:${SpringBootCouponPort}"
+    Description: Endpoint URL for accessing the Spring Boot Coupon API
+    Value: !Sub "http://${MLLoadBalancer.DNSName}:${SpringBootCouponPort}"
