@@ -22,7 +22,7 @@ Parameters:
   SpringBootCouponImage:
     Type: String
     Description: Docker image URI for the Spring Boot API
-    Default: https://hub.docker.com/r/lichobaron/coupon
+    Default: 339713083660.dkr.ecr.us-east-1.amazonaws.com/mercado-libre:latest
   SpringBootBookmarkPort:
     Type: Number
     Description: Port on which Spring Boot API will listen
@@ -46,6 +46,7 @@ Resources:
       VpcId: !Ref MLVPC
       CidrBlock: '10.0.0.0/24'
       AvailabilityZone: 'us-east-1a'
+      MapPublicIpOnLaunch: true
 
   MLSubnet2:
     Type: 'AWS::EC2::Subnet'
@@ -53,6 +54,7 @@ Resources:
       VpcId: !Ref MLVPC
       CidrBlock: '10.0.1.0/24'
       AvailabilityZone: 'us-east-1b'
+      MapPublicIpOnLaunch: true
 
   MLInternetGateway:
     Type: 'AWS::EC2::InternetGateway'
@@ -67,6 +69,14 @@ Resources:
     Type: 'AWS::EC2::RouteTable'
     Properties:
       VpcId: !Ref MLVPC
+    
+  MLPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref MLRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref MLInternetGateway
 
   MLSubnet1RouteTableAssociation:
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
