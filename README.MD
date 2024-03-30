@@ -93,7 +93,7 @@ curl --location --request POST 'MercadoLibreCouponLB-158385986.us-east-1.elb.ama
 ### Architecture
 ![architecture](./ml-design.png)
 
-### How Deploy
+### How to deploy
 
 You can find deployment instructions here:
 [Deploy](DEPLOY.MD)
