@@ -50,6 +50,12 @@
 curl --location --request GET 'http://localhost:8080/coupon/stats'
 ```
 
+#### AWS:
+
+```bash
+curl --location --request GET 'MercadoLibreBookmarkLB-341430534.us-east-1.elb.amazonaws.com/coupon/stats'
+```
+
 ### Optimize Coupon
 
 ```bash
@@ -65,3 +71,28 @@ curl --location --request POST 'http://localhost:8081/coupon' \
     "amount": 1000
 }'
 ```
+
+#### AWS:
+
+```bash
+curl --location --request POST 'MercadoLibreCouponLB-158385986.us-east-1.elb.amazonaws.com/coupon' \
+--header 'Content-Type: application/json' \
+--data '{
+    "itemIds": [
+        "MLA811601010",
+        "MLA878620076",
+        "MLA1416208901",
+        "MLA905560536"
+    ],
+    "amount": 1000
+}'
+```
+
+## Deployment
+
+### Architecture
+
+### How Deploy
+
+You can find deployment instructions here:
+[Deploy](DEPLOY.MD)
