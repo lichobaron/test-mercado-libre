@@ -91,6 +91,7 @@ curl --location --request POST 'MercadoLibreCouponLB-158385986.us-east-1.elb.ama
 ## Deployment
 
 ### Architecture
+![architecture](./ml-design.png)
 
 ### How Deploy
 
