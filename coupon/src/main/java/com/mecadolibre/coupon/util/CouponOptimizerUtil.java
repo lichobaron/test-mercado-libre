@@ -23,11 +23,20 @@ public class CouponOptimizerUtil {
         for (int i = 1; i <= n; i++) {
             for (int j = 0; j <= couponValue; j++) {
                 BigDecimal currentPrice = BigDecimal.valueOf(items.get(i - 1).getPrice());
+                // Si el precio del item es menor o igual al precio de un cupon con capacidad j
+                // esto significa que el item cabe en el cupon
                 if (currentPrice.compareTo(BigDecimal.valueOf(j)) <= 0) {
+                    // entonces:
+                    // Guardamos en la posicion [item][cupon j], ll valor maximo entre:
+                    //  El valor del meter el item anterior (i-1) en el cupon j
+                    //  o
+                    //  El valor del item anterior para un cupon (j - precio actual) + el precio actual (valor de meter item actual)
                     memoTable[i][j] = memoTable[i - 1][j].max(
                             memoTable[i - 1][j - getBDIndex(currentPrice)].add(currentPrice)
                     );
                 } else {
+                    // Si el item no cabe en el cupon
+                    // Solo guardamos el valor del item anterior para un cupon j
                     memoTable[i][j] = memoTable[i - 1][j];
                 }
             }
@@ -39,14 +48,27 @@ public class CouponOptimizerUtil {
             if (maxSpent.compareTo(BigDecimal.ZERO) <= 0) {
                 break;
             }
+            // Si el maximo gastado es diferente a el valor de usar el item anterior (i-1) en un cupon del maximo gastado
+            // Esto significa que se uso el item actual
             if (!maxSpent.equals(memoTable[i - 1][getBDIndex(maxSpent)])) {
+                // Se selecciona el item actual
                 selectedItems.add(items.get(i - 1));
+                // El maximo gastado se le resta el precio del item actual
                 maxSpent = maxSpent.subtract(BigDecimal.valueOf(items.get(i - 1).getPrice()));
             }
+            //Si el maximo gastado es igual el valor de usar el item anterior (i-1) en un cupon del maximo gastado
+            // Esto significa que no se usa el item actual
         }
 
-        System.out.println("Max: ");
-        System.out.println(memoTable[n][couponValue]);
+//        System.out.println("Max: ");
+//        System.out.println(memoTable[n][couponValue]);
+//        System.out.println(selectedItems);
+//        for (int i = 0; i <= n; i++) {
+//            for (int j = 0; j <= couponValue; j++) {
+//                System.out.print(memoTable[i][j] + "  ");
+//            }
+//            System.out.println();
+//        }
 
         return selectedItems;
     }
